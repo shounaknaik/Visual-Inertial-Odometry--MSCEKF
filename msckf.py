@@ -305,27 +305,39 @@ class MSCKF(object):
 
             current_imu_msg_time=imu_msg.timestamp
 
-            if self.state_server.imu_state.time>current_imu_msg_time:
+            if self.state_server.imu_state.timestamp>current_imu_msg_time:
 
                 ### Basically wait till the the imu_msg timestamp is greater than the state server.
                 ### State Server updates time after every batch
                 msg_counter+=1
                 continue
-            
 
+            if current_imu_msg_time>time_bound:
+                break
 
+            angular_velocity=np.array(imu_msg.angular_velocity)
+            linear_acceleration=np.array(imu_msg.linear_acceleration)
 
+            self.process_model(current_imu_msg_time,angular_velocity,linear_acceleration)
 
+            msg_counter+=1
 
         
         # Set the current imu id to be the IMUState.next_id
         ...
-        
         # IMUState.next_id increments
         ...
-
+        self.state_server.imu_state.id=IMUState.next_id
+        IMUState.next_id+=1
+        
+        print(msg_counter)
         # Remove all used IMU msgs.
         ...
+
+        self.imu_msg_buffer=self.imu_msg_buffer[msg_counter-1:]
+
+
+        return 
 
     def process_model(self, time, m_gyro, m_acc):
         """
@@ -345,7 +357,7 @@ class MSCKF(object):
         ...
 
         # Propogate the state using 4th order Runge-Kutta
-        self.predict_new_state(dt, gyro, acc)
+        # self.predict_new_state(dt, gyro, acc)
 
         # Modify the transition matrix
         ...
