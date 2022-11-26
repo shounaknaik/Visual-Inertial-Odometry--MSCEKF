@@ -307,7 +307,7 @@ class MSCKF(object):
 
             if self.state_server.imu_state.timestamp>current_imu_msg_time:
 
-                ### Basically wait till the the imu_msg timestamp is greater than the state server.
+                ### Basically skip the the imu_msg timestamp is greater than the state server.
                 ### State Server updates time after every batch
                 msg_counter+=1
                 continue
@@ -330,7 +330,7 @@ class MSCKF(object):
         self.state_server.imu_state.id=IMUState.next_id
         IMUState.next_id+=1
         
-        print(msg_counter)
+        # print(msg_counter)
         # Remove all used IMU msgs.
         ...
 
@@ -379,35 +379,80 @@ class MSCKF(object):
         """Propogate the state using 4th order Runge-Kutta for equstion (1) in "MSCKF" paper"""
         # compute norm of gyro
         ...
+        gyro_normalized=np.linalg.norm(gyro)
+
         
         # Get the Omega matrix, the equation above equation (2) in "MSCKF" paper
         ...
         
+        Omega=np.zeros((4,4))
+        Omega[:3,:3]=-skew(gyro)
+        Omega[:3,-1]=gyro
+        Omega[-1,:3]=-gyro
+        
         # Get the orientation, velocity, position
         ...
+        orientation=self.state_server.imu_state.orientation
+        velocity=self.state_server.imu_state.velocity
+        position=self.state_server.imu_state.position
         
         # Compute the dq_dt, dq_dt2 in equation (1) in "MSCKF" paper
         ...
+        dq_dt=np.zeros([])
+        dq_dt2=np.zeros([])
+        if gyro_normalized > 1e-5:
+
+            dq_dt=(np.cos(gyro_normalized*dt*0.5)*np.identity(4)+(np.sin(gyro_normalized*dt*0.5)*Omega)/(gyro_normalized))*orientation
+
+            dq_dt2=(np.cos(gyro_normalized*dt*0.25)*np.identity(4)+(np.sin(gyro_normalized*dt*0.25)*Omega)/(gyro_normalized))*orientation
+
+        else:
+
+            ### Using the approximation - tan(theta)/theta ---> 1
+
+            dq_dt=(np.identity(4)+0.5*dt*Omega)*np.cos(gyro_normalized*0.5)*orientation
+            dq_dt2=(np.identity(4)+0.25*dt*Omega)*np.cos(gyro_normalized*0.25)*orientation
+
+
+        dR_dt=to_rotation(dq_dt)
+        dR_dt_2=to_rotation(dq_dt2)
         
         # Apply 4th order Runge-Kutta 
         # k1 = f(tn, yn)
         ...
+        k1_v=to_rotation(orientation).T*acc+IMUState.gravity
+        k1_p=velocity
 
         # k2 = f(tn+dt/2, yn+k1*dt/2)
         ...
+
+        k2_v=dR_dt_2.T*acc+IMUState.gravity ## Understood the velocity terms
+        k2_p=velocity+dt*0.5*k1_v   ### Doubt about the accelartion term.
         
         # k3 = f(tn+dt/2, yn+k2*dt/2)
         ...
+        k3_v=dR_dt_2.T*acc+IMUState.gravity
+        k3_p=velocity+dt*0.5*k2_v
         
         # k4 = f(tn+dt, yn+k3*dt)
         ...
+        k4_v=dR_dt.T*acc +IMUState.gravity
+        k4_p=velocity+dt*k3_p
 
         # yn+1 = yn + dt/6*(k1+2*k2+2*k3+k4)
         ...
+        q=dq_dt
+        velocity=velocity+dt/6*(k1_v+2*k2_v+2*k3_v+k4_v)
+        position=position+dt/6*(k1_p+2*k2_p+2*k3_p+k4_p)
+
 
         # update the imu state
         ...
+        self.state_server.imu_state.orientation=q
+        self.state_server.imu_state.velocity=velocity
+        self.state_server.imu_state.position=position
 
+        return
     
     def state_augmentation(self, time):
         """
