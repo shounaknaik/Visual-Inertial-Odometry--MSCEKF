@@ -357,7 +357,7 @@ class MSCKF(object):
         ...
 
         # Propogate the state using 4th order Runge-Kutta
-        # self.predict_new_state(dt, gyro, acc)
+        self.predict_new_state(dt, gyro, acc)
 
         # Modify the transition matrix
         ...
@@ -402,16 +402,15 @@ class MSCKF(object):
         dq_dt2=np.zeros([])
         if gyro_normalized > 1e-5:
 
-            dq_dt=(np.cos(gyro_normalized*dt*0.5)*np.identity(4)+(np.sin(gyro_normalized*dt*0.5)*Omega)/(gyro_normalized))*orientation
-
-            dq_dt2=(np.cos(gyro_normalized*dt*0.25)*np.identity(4)+(np.sin(gyro_normalized*dt*0.25)*Omega)/(gyro_normalized))*orientation
+            dq_dt=(np.cos(gyro_normalized*dt*0.5)@np.identity(4)+(np.sin(gyro_normalized*dt*0.5)@Omega)/(gyro_normalized))@orientation
+            dq_dt2=(np.cos(gyro_normalized*dt*0.25)@np.identity(4)+(np.sin(gyro_normalized*dt*0.25)@Omega)/(gyro_normalized))@orientation
 
         else:
 
             ### Using the approximation - tan(theta)/theta ---> 1
 
-            dq_dt=(np.identity(4)+0.5*dt*Omega)*np.cos(gyro_normalized*0.5)*orientation
-            dq_dt2=(np.identity(4)+0.25*dt*Omega)*np.cos(gyro_normalized*0.25)*orientation
+            dq_dt=(np.identity(4)+0.5*dt@Omega)*np.cos(gyro_normalized*0.5)@orientation
+            dq_dt2=(np.identity(4)+0.25*dt@Omega)*np.cos(gyro_normalized*0.25)@orientation
 
 
         dR_dt=to_rotation(dq_dt)
@@ -420,23 +419,23 @@ class MSCKF(object):
         # Apply 4th order Runge-Kutta 
         # k1 = f(tn, yn)
         ...
-        k1_v=to_rotation(orientation).T*acc+IMUState.gravity
+        k1_v=to_rotation(orientation).T@acc+IMUState.gravity
         k1_p=velocity
 
         # k2 = f(tn+dt/2, yn+k1*dt/2)
         ...
 
-        k2_v=dR_dt_2.T*acc+IMUState.gravity ## Understood the velocity terms
+        k2_v=dR_dt_2.T@acc+IMUState.gravity ## Understood the velocity terms
         k2_p=velocity+dt*0.5*k1_v   ### Doubt about the accelartion term.
         
         # k3 = f(tn+dt/2, yn+k2*dt/2)
         ...
-        k3_v=dR_dt_2.T*acc+IMUState.gravity
+        k3_v=dR_dt_2.T@acc+IMUState.gravity
         k3_p=velocity+dt*0.5*k2_v
         
         # k4 = f(tn+dt, yn+k3*dt)
         ...
-        k4_v=dR_dt.T*acc +IMUState.gravity
+        k4_v=dR_dt.T@acc +IMUState.gravity
         k4_p=velocity+dt*k3_p
 
         # yn+1 = yn + dt/6*(k1+2*k2+2*k3+k4)
@@ -464,14 +463,41 @@ class MSCKF(object):
         # Get the imu_state, rotation from imu to cam0, and translation from cam0 to imu
         ...
 
+        R_imu_camera=self.state_server.imu_state.R_imu_cam0
+        t_camera_imu=self.state_server.imu_state.t_cam0_imu
+
         # Add a new camera state to the state server.
         ...
-        
+        R_world_imu=to_rotation(self.state_server.imu_state.orientation)
+        ## Convention is that the base frame is the first one and the second one is the target frame ##
+
+        R_world_camera=R_imu_camera*R_world_camera
+        t_camera_world=self.imu_state.position+R_world_imu.T@t_camera_imu
+
+        self.state_server.cam_states[self.state_server.imu_state.id]=
+        CAMState(self.state_server.imu_state.id)
+
+        cam_state=self.state_server.cam_states[self.state_server.imu_state.id]
+
+
+        cam_state.time=time
+        cam_state.orientation=to_quaternion(R_world_camera)
+        cam_state.position=t_camera_world
+
+
+        ###This is done for Jacobian purposes ###
+        cam_state.orientation_null=cam_state.orientation
+        cam_state.position_null=cam_state.position
+
 
         # Update the covariance matrix of the state.
         # To simplify computation, the matrix J below is the nontrivial block
         # Appendix B of "MSCKF" paper.
         ...
+
+
+
+
 
         # Resize the state covariance matrix.
         ...
