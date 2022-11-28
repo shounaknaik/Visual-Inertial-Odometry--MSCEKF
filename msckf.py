@@ -98,6 +98,7 @@ class StateServer(object):
 
 
 class MSCKF(object):
+
     def __init__(self, config):
         self.config = config
         self.optimization_config = config.optimization_config
@@ -377,7 +378,7 @@ class MSCKF(object):
         Fdt=F*dt
         Fdt_square=Fdt@Fdt
         Fdt_cube=Fdt_square@Fdt
-        Phi=np.identity(3)+ Fdt+0.5*Fdt_square+(1/6)*Fdt_cube
+        Phi=np.identity(21)+ Fdt+0.5*Fdt_square+(1/6)*Fdt_cube
 
         # Propogate the state using 4th order Runge-Kutta
         self.predict_new_state(dt, gyro, acc)
@@ -385,6 +386,21 @@ class MSCKF(object):
         # Modify the transition matrix for nullspace thing.
         ...
 
+        R_k_1=to_rotation(imu_state.orientation_null)
+        Phi[:3,:3]=to_rotation(imu_state.orientation)@R_k_1.T
+
+
+        u=R_k_1@IMUState.gravity
+        u=np.reshape(u,(3,1))
+        s=np.linalg.inv((u.T)@u)@(u.T)
+
+        A1=Phi[6:9,:3]
+        w1=skew(imu_state.velocity_null-imu_state.velocity)@IMUState.gravity
+        Phi[6:9,:3]=A1-(A1@u-w1)@s
+
+        A2=Phi[12:15,:3]
+        w2=skew(imu_state.velocity_null+imu_state.position_null-imu_state.position)@IMUState.gravity
+        Phi[12:15,:3]=A2-(A2@u-w2)@s
 
 
         # Propogate the state covariance matrix.
@@ -392,10 +408,13 @@ class MSCKF(object):
         Q=Phi@G@self.state_server.continuous_noise_cov@G.T@Phi.T*dt
         self.state_server.state_cov[:21,:21]=self.state_server.state_cov[:21,:21]@Phi.T +Q
 
+        rows,columns=self.state_server.state_cov.shape
+
         ## If condition put in to check if atleast camera state has been seen.
         if len(self.state_server.cam_states) > 0: 
 
-            self.state_server.state_cov
+            self.state_server.state_cov[0:21,21:columns]=Phi@self.state_server.state_cov[0:21,21:columns]
+            self.state_server.state_cov[21:rows,:21]=self.state_server.state_cov[21:rows,:21]@Phi.T
 
 
         # Fix the covariance to be symmetric
@@ -447,15 +466,15 @@ class MSCKF(object):
         dq_dt2=np.zeros([])
         if gyro_normalized > 1e-5:
 
-            dq_dt=(np.cos(gyro_normalized*dt*0.5)@np.identity(4)+(np.sin(gyro_normalized*dt*0.5)@Omega)/(gyro_normalized))@orientation
-            dq_dt2=(np.cos(gyro_normalized*dt*0.25)@np.identity(4)+(np.sin(gyro_normalized*dt*0.25)@Omega)/(gyro_normalized))@orientation
+            dq_dt=(np.cos(gyro_normalized*dt*0.5)*np.identity(4)+(np.sin(gyro_normalized*dt*0.5)*Omega)/(gyro_normalized))@orientation
+            dq_dt2=(np.cos(gyro_normalized*dt*0.25)*np.identity(4)+(np.sin(gyro_normalized*dt*0.25)*Omega)/(gyro_normalized))@orientation
 
         else:
 
             ### Using the approximation - tan(theta)/theta ---> 1
 
-            dq_dt=(np.identity(4)+0.5*dt@Omega)*np.cos(gyro_normalized*0.5)@orientation
-            dq_dt2=(np.identity(4)+0.25*dt@Omega)*np.cos(gyro_normalized*0.25)@orientation
+            dq_dt=(np.identity(4)+0.5*dt*Omega)*np.cos(gyro_normalized*0.5)@orientation
+            dq_dt2=(np.identity(4)+0.25*dt*Omega)*np.cos(gyro_normalized*0.25)@orientation
 
 
         dR_dt=to_rotation(dq_dt)
@@ -519,7 +538,7 @@ class MSCKF(object):
         R_world_camera=R_imu_camera*R_world_camera
         t_camera_world=self.imu_state.position+R_world_imu.T@t_camera_imu
 
-        self.state_server.cam_states[self.state_server.imu_state.id]=
+        # self.state_server.cam_states[self.state_server.imu_state.id]=
         CAMState(self.state_server.imu_state.id)
 
         cam_state=self.state_server.cam_states[self.state_server.imu_state.id]
@@ -542,8 +561,6 @@ class MSCKF(object):
 
 
 
-
-
         # Resize the state covariance matrix.
         ...
 
@@ -555,16 +572,39 @@ class MSCKF(object):
 
     def add_feature_observations(self, feature_msg):
         """
-        IMPLEMENT THIS!!!!!
+        IMPLEMENT THIS!!!!!   features are being added into map_server 
         """
         # get the current imu state id and number of current features
         ...
-        
+
+        state_id=self.state_server.imu_state.id
+        num_curr_features=len(self.map_server)
+
+        tracked_feature_num=0
+
         # add all features in the feature_msg to self.map_server
         ...
 
+        for feature in feature_msg.features:
+
+            if feature.id not in self.map_server:
+
+                self.map_server[feature.id]=Feature(feature.id)
+                self.map_server[feature.id].obeservations[state_id]=np.array([feature.u0,feature.v0,feature.u1,feature.v1])
+
+            else:
+
+                self.map_server[feature.id].observations[state_id]=np.array([feature.u0, feature.v0,feature.u1,feature.v1])
+
+                tracked_feature_num+=1
+
+
         # update the tracking rate
         ...
+
+        self.tracking_rate=tracked_feature_num/(num_curr_features)
+
+        return
 
     def measurement_jacobian(self, cam_state_id, feature_id):
         """
