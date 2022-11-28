@@ -348,28 +348,73 @@ class MSCKF(object):
         """
         # Get the error IMU state
         ...
+        imu_state=self.state_server.imu_state
+        gyro=m_gyro-imu_state.gyro_bias
+        acc=m_acc-imu_state.acc_bias
+
+        dt=time-imu_state.timestamp
 
         # Compute discrete transition F, Q matrices in Appendix A in "MSCKF" paper
         ...
+        F=np.zeros((21,21))
+        G=np.zeros((21,12))
+        
+        F[:3,:3]=-skew(gyro)
+        F[:3,3:6]=-np.identity(3)
+        F[6:9,:3]=-to_rotation(imu_state.orientation).T @ skew(acc)
+        F[6:9,9:12]=-to_rotation(imu_state.orientation).T
+        F[12:15,6:9]=np.identity(3)
+
+        G[:3,:3]=-np.identity(3)
+        G[3:6,3:6]=np.identity(3)
+        G[6:9,6:9]=-to_rotation(imu_state.orientation).T
+        G[9:12,9:12]=np.identity(3)
         
         # Approximate matrix exponential to the 3rd order, which can be 
         # considered to be accurate enough assuming dt is within 0.01s.
         ...
 
+        Fdt=F*dt
+        Fdt_square=Fdt@Fdt
+        Fdt_cube=Fdt_square@Fdt
+        Phi=np.identity(3)+ Fdt+0.5*Fdt_square+(1/6)*Fdt_cube
+
         # Propogate the state using 4th order Runge-Kutta
         self.predict_new_state(dt, gyro, acc)
 
-        # Modify the transition matrix
+        # Modify the transition matrix for nullspace thing.
         ...
+
+
 
         # Propogate the state covariance matrix.
         ...
+        Q=Phi@G@self.state_server.continuous_noise_cov@G.T@Phi.T*dt
+        self.state_server.state_cov[:21,:21]=self.state_server.state_cov[:21,:21]@Phi.T +Q
+
+        ## If condition put in to check if atleast camera state has been seen.
+        if len(self.state_server.cam_states) > 0: 
+
+            self.state_server.state_cov
+
 
         # Fix the covariance to be symmetric
         ...
+
+        state_cov_fix=(self.state_server.state_cov+self.state_server.state_cov.T)/2
+        self.state_server.state_cov=state_cov_fix
+
+
         
         # Update the state correspondes to null space.
         ...
+        imu_state.orientation_null=imu_state.orientation
+        imu_state.position_null=imu_state.position
+        imu_state.velocity_null=imu_state.velocity
+
+        imu_state.time=time
+
+        return
         
 
     def predict_new_state(self, dt, gyro, acc):
