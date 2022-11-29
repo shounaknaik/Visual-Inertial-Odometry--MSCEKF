@@ -395,11 +395,11 @@ class MSCKF(object):
         s=np.linalg.inv((u.T)@u)@(u.T)
 
         A1=Phi[6:9,:3]
-        w1=skew(imu_state.velocity_null-imu_state.velocity)@IMUState.gravity
-        Phi[6:9,:3]=A1-(A1@u-w1)@s
+        w1=skew(imu_state.velocity_null-imu_state.velocity)@IMUState.gravity.reshape((3,1))
+        Phi[6:9,:3]=A1-(np.dot(A1,u)-w1)@s
 
         A2=Phi[12:15,:3]
-        w2=skew(imu_state.velocity_null+imu_state.position_null-imu_state.position)@IMUState.gravity
+        w2=skew(imu_state.velocity_null+imu_state.position_null-imu_state.position)@IMUState.gravity.reshape((3,1))
         Phi[12:15,:3]=A2-(A2@u-w2)@s
 
 
@@ -535,11 +535,10 @@ class MSCKF(object):
         R_world_imu=to_rotation(self.state_server.imu_state.orientation)
         ## Convention is that the base frame is the first one and the second one is the target frame ##
 
-        R_world_camera=R_imu_camera*R_world_camera
-        t_camera_world=self.imu_state.position+R_world_imu.T@t_camera_imu
+        R_world_camera=R_imu_camera*R_world_imu
+        t_camera_world=self.state_server.imu_state.position+R_world_imu.T@t_camera_imu
 
-        # self.state_server.cam_states[self.state_server.imu_state.id]=
-        CAMState(self.state_server.imu_state.id)
+        self.state_server.cam_states[self.state_server.imu_state.id]=CAMState(self.state_server.imu_state.id)
 
         cam_state=self.state_server.cam_states[self.state_server.imu_state.id]
 
@@ -559,16 +558,36 @@ class MSCKF(object):
         # Appendix B of "MSCKF" paper.
         ...
 
+        J=np.zeros((6,21))
+        J[:3,:3]=R_imu_camera
+        J[:3,15:18]=np.identity(3)
+        J[3:6,:3]=skew(R_world_imu.T@ t_camera_imu)
+        J[3:6,12:15]=np.identity(3)
+        J[3:6,18:21]=np.identity(3)
 
+        old_size=self.state_server.state_cov.shape[0]
+        state_cov=np.zeros((old_size+6,old_size+6))
+
+        state_cov[:old_size,:old_size]=self.state_server.state_cov
 
         # Resize the state covariance matrix.
         ...
 
+
         # Fill in the augmented state covariance.
         ...
-
+        
+        state_cov[old_size:,:old_size]=J@state_cov[:21,:old_size]
+        state_cov[:old_size,old_size:]=state_cov[old_size:,:old_size].T
+        state_cov[old_size:,old_size:]=J@state_cov[:21,:21]@J.T
         # Fix the covariance to be symmetric
         ...
+
+        self.state_server.state_cov=(state_cov+state_cov.T)/2
+
+
+
+        return 
 
     def add_feature_observations(self, feature_msg):
         """
@@ -589,8 +608,8 @@ class MSCKF(object):
 
             if feature.id not in self.map_server:
 
-                self.map_server[feature.id]=Feature(feature.id)
-                self.map_server[feature.id].obeservations[state_id]=np.array([feature.u0,feature.v0,feature.u1,feature.v1])
+                self.map_server[feature.id]=Feature(feature.id,self.optimization_config)
+                self.map_server[feature.id].observations[state_id]=np.array([feature.u0,feature.v0,feature.u1,feature.v1])
 
             else:
 
@@ -602,7 +621,9 @@ class MSCKF(object):
         # update the tracking rate
         ...
 
-        self.tracking_rate=tracked_feature_num/(num_curr_features)
+        if num_curr_features>0:
+
+            self.tracking_rate=tracked_feature_num/(num_curr_features)
 
         return
 
