@@ -335,7 +335,7 @@ class MSCKF(object):
         # Remove all used IMU msgs.
         ...
 
-        self.imu_msg_buffer=self.imu_msg_buffer[msg_counter-1:]
+        self.imu_msg_buffer=self.imu_msg_buffer[msg_counter:]
 
 
         return 
@@ -387,9 +387,9 @@ class MSCKF(object):
         ...
 
         R_k_1=to_rotation(imu_state.orientation_null)
-        Phi[:3,:3]=to_rotation(imu_state.orientation)@R_k_1.T
+        Phi[:3,:3]=to_rotation(imu_state.orientation)@ R_k_1.T
 
-
+        ## Review this !!!
         u=R_k_1@IMUState.gravity
         u=np.reshape(u,(3,1))
         s=np.linalg.inv((u.T)@u)@(u.T)
@@ -406,15 +406,14 @@ class MSCKF(object):
         # Propogate the state covariance matrix.
         ...
         Q=Phi@G@self.state_server.continuous_noise_cov@G.T@Phi.T*dt
-        self.state_server.state_cov[:21,:21]=self.state_server.state_cov[:21,:21]@Phi.T +Q
+        self.state_server.state_cov[:21,:21]=(self.state_server.state_cov[:21,:21]@Phi.T +Q)
 
-        rows,columns=self.state_server.state_cov.shape
 
         ## If condition put in to check if atleast camera state has been seen.
         if len(self.state_server.cam_states) > 0: 
 
-            self.state_server.state_cov[0:21,21:columns]=Phi@self.state_server.state_cov[0:21,21:columns]
-            self.state_server.state_cov[21:rows,:21]=self.state_server.state_cov[21:rows,:21]@Phi.T
+            self.state_server.state_cov[0:21,21:]=Phi@self.state_server.state_cov[0:21,21:]
+            self.state_server.state_cov[21:,:21]=self.state_server.state_cov[21:,:21]@Phi.T
 
 
         # Fix the covariance to be symmetric
@@ -431,7 +430,7 @@ class MSCKF(object):
         imu_state.position_null=imu_state.position
         imu_state.velocity_null=imu_state.velocity
 
-        imu_state.time=time
+        imu_state.timestamp=time
 
         return
         
@@ -477,8 +476,8 @@ class MSCKF(object):
             dq_dt2=(np.identity(4)+0.25*dt*Omega)*np.cos(gyro_normalized*0.25)@orientation
 
 
-        dR_dt=to_rotation(dq_dt)
-        dR_dt_2=to_rotation(dq_dt2)
+        dR_dt=to_rotation(dq_dt).T
+        dR_dt_2=to_rotation(dq_dt2).T
         
         # Apply 4th order Runge-Kutta 
         # k1 = f(tn, yn)
@@ -489,22 +488,22 @@ class MSCKF(object):
         # k2 = f(tn+dt/2, yn+k1*dt/2)
         ...
 
-        k2_v=dR_dt_2.T@acc+IMUState.gravity ## Understood the velocity terms
+        k2_v=dR_dt_2@acc+IMUState.gravity ## Understood the velocity terms
         k2_p=velocity+dt*0.5*k1_v   ### Doubt about the accelartion term.
         
         # k3 = f(tn+dt/2, yn+k2*dt/2)
         ...
-        k3_v=dR_dt_2.T@acc+IMUState.gravity
+        k3_v=dR_dt_2@acc+IMUState.gravity
         k3_p=velocity+dt*0.5*k2_v
         
         # k4 = f(tn+dt, yn+k3*dt)
         ...
-        k4_v=dR_dt.T@acc +IMUState.gravity
+        k4_v=dR_dt@acc +IMUState.gravity
         k4_p=velocity+dt*k3_p
 
         # yn+1 = yn + dt/6*(k1+2*k2+2*k3+k4)
         ...
-        q=dq_dt
+        q=dq_dt/np.linalg.norm(dq_dt)
         velocity=velocity+dt/6*(k1_v+2*k2_v+2*k3_v+k4_v)
         position=position+dt/6*(k1_p+2*k2_p+2*k3_p+k4_p)
 
@@ -535,7 +534,7 @@ class MSCKF(object):
         R_world_imu=to_rotation(self.state_server.imu_state.orientation)
         ## Convention is that the base frame is the first one and the second one is the target frame ##
 
-        R_world_camera=R_imu_camera*R_world_imu
+        R_world_camera=R_imu_camera@R_world_imu
         t_camera_world=self.state_server.imu_state.position+R_world_imu.T@t_camera_imu
 
         self.state_server.cam_states[self.state_server.imu_state.id]=CAMState(self.state_server.imu_state.id)
@@ -543,7 +542,7 @@ class MSCKF(object):
         cam_state=self.state_server.cam_states[self.state_server.imu_state.id]
 
 
-        cam_state.time=time
+        cam_state.timestamp=time
         cam_state.orientation=to_quaternion(R_world_camera)
         cam_state.position=t_camera_world
 
@@ -585,9 +584,7 @@ class MSCKF(object):
 
         self.state_server.state_cov=(state_cov+state_cov.T)/2
 
-
-
-        return 
+        return
 
     def add_feature_observations(self, feature_msg):
         """
@@ -621,9 +618,7 @@ class MSCKF(object):
         # update the tracking rate
         ...
 
-        if num_curr_features>0:
-
-            self.tracking_rate=tracked_feature_num/(num_curr_features)
+        self.tracking_rate=tracked_feature_num/(num_curr_features+1e-5)
 
         return
 
@@ -803,7 +798,7 @@ class MSCKF(object):
 
             delta_x_cam=delta_x[21+i*6:27+i*6]
             dq_cam=small_angle_quaternion(delta_x_cam[:3])
-            cam_state.orientation=quaternion_multiplication(dq_cam,cam_state.orientaion)
+            cam_state.orientation=quaternion_multiplication(dq_cam,cam_state.orientation)
 
             cam_state.position +=delta_x_cam[3:]
 
@@ -1108,7 +1103,7 @@ class MSCKF(object):
         # print('+++publish:')
         # print('   timestamp:', imu_state.timestamp)
         # print('   orientation:', imu_state.orientation)
-        # print('   position:', imu_state.position)
+        print('   position:', imu_state.position)
         # print('   velocity:', imu_state.velocity)
         # print()
         
