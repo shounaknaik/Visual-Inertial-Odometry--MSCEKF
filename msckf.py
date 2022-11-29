@@ -751,27 +751,75 @@ class MSCKF(object):
         # Check if H and r are empty
         ...
 
+        if len(H)==0 or len(r)==0:
+            return
+
         # Decompose the final Jacobian matrix to reduce computational
         # complexity.
         ...
+        #### Eqution 28 in Seminal Paper#####
+        if H.shape[0]>H.shape[1]:
+            Q,R=np.linalg.qr(H,mode='reduced')
+            H_thin=R
+            r_thin=Q.T@r
+
+        else:
+            r_thin=r
+            H_thin=H
+
 
         # Compute the Kalman gain.
         ...
+        P=self.state_server.state_cov
+        S=H_thin @P @ H_thin.T + self.config.observation_noise*np.identity(len(H_thin))
+
+        K=np.linalg.solve(S, H_thin @ P).T
+        
 
         # Compute the error of the state.
         ...
+
+        delta_x= K @ r_thin
         
         # Update the IMU state.
         ...
+        delta_x_imu=delta_x[:21]
+
+        dq_imu=small_angle_quaternion(delta_x_imu[:3])
+
+        imu_state=self.state_server.imu_state
+        imu_state.orientation=quaternion_multiplication(dq_imu,imu_state.orientation)
+        imu_state.gyro_bias+=delta_x_imu[3:6]
+        imu_state.velocity+=delta_x_imu[6:9]
+        imu_state.acc_bias+=delta_x_imu[9:12]
+        imu_state.position+=delta_x_imu[12:15]
+
+
 
         # Update the camera states.
         ...
 
+        for i, (id,cam_state) in enumerate(self.state_server.cam_states.items()):
+
+            delta_x_cam=delta_x[21+i*6:27+i*6]
+            dq_cam=small_angle_quaternion(delta_x_cam[:3])
+            cam_state.orientation=quaternion_multiplication(dq_cam,cam_state.orientaion)
+
+            cam_state.position +=delta_x_cam[3:]
+
+    
+
         # Update state covariance.
         ...
+        I_K=np.identity(len(K))-(K @ H_thin)  ## Equation 31 in seminal paper.
+        state_cov=I_K @ self.state_server.state_cov
 
         # Fix the covariance to be symmetric
         ...
+
+        self.state_server.state_cov=(state_cov+state_cov.T)/2
+
+        
 
     def gating_test(self, H, r, dof):
         P1 = H @ self.state_server.state_cov @ H.T
