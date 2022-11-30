@@ -258,7 +258,7 @@ class MSCKF(object):
 
         # print("HEREEEE!",self.state_server.imu_state.gyro_bias.shape)
 
-        self.state_server.imu_state.acc_bias=linear_mean.flatten()
+        # self.state_server.imu_state.acc_bias=linear_mean.flatten()
         
 
         # Find the gravity in the IMU frame.
@@ -275,12 +275,14 @@ class MSCKF(object):
         # is consistent with the inertial frame.
         ...
 
-        q_to_world=from_two_vectors(linear_mean.flatten(),-IMUState.gravity)
-        q_to_imu=to_quaternion(to_rotation(q_to_world).T)
+        q_to_world=from_two_vectors(-IMUState.gravity,linear_mean.flatten())
+        # q_to_imu=to_quaternion(to_rotation(q_to_world).T)
 
-        self.state_server.imu_state.orientation=q_to_imu
+        self.state_server.imu_state.orientation=q_to_world
 
         print(self.state_server.imu_state.orientation) ## Paper says to store World to IMU quartenion 
+        print(self.state_server.imu_state.acc_bias)
+        print(IMUState.gravity)
 
         return
 
@@ -306,7 +308,7 @@ class MSCKF(object):
 
             current_imu_msg_time=imu_msg.timestamp
 
-            if self.state_server.imu_state.timestamp>current_imu_msg_time:
+            if current_imu_msg_time<self.state_server.imu_state.timestamp:
 
                 ### Basically skip the the imu_msg timestamp is greater than the state server.
                 ### State Server updates time after every batch
@@ -322,6 +324,7 @@ class MSCKF(object):
             self.process_model(current_imu_msg_time,angular_velocity,linear_acceleration)
 
             msg_counter+=1
+            self.state_server.imu_state.timestamp = current_imu_msg_time
 
         
         # Set the current imu id to be the IMUState.next_id
@@ -337,6 +340,8 @@ class MSCKF(object):
 
         self.imu_msg_buffer=self.imu_msg_buffer[msg_counter:]
 
+
+        #########################################
 
         return 
 
@@ -378,7 +383,7 @@ class MSCKF(object):
         Fdt=F*dt
         Fdt_square=Fdt@Fdt
         Fdt_cube=Fdt_square@Fdt
-        Phi=np.identity(21)+ Fdt+0.5*Fdt_square+(1/6)*Fdt_cube
+        Phi=np.identity(21)+ Fdt+0.5*Fdt_square+((1/6)*Fdt_cube)
 
         # Propogate the state using 4th order Runge-Kutta
         self.predict_new_state(dt, gyro, acc)
@@ -406,7 +411,7 @@ class MSCKF(object):
         # Propogate the state covariance matrix.
         ...
         Q=Phi@G@self.state_server.continuous_noise_cov@G.T@Phi.T*dt
-        self.state_server.state_cov[:21,:21]=(self.state_server.state_cov[:21,:21]@Phi.T +Q)
+        self.state_server.state_cov[:21,:21]=(Phi@self.state_server.state_cov[:21,:21]@Phi.T +Q)
 
 
         ## If condition put in to check if atleast camera state has been seen.
@@ -430,10 +435,10 @@ class MSCKF(object):
         imu_state.position_null=imu_state.position
         imu_state.velocity_null=imu_state.velocity
 
-        imu_state.timestamp=time
 
         return
-        
+
+       
 
     def predict_new_state(self, dt, gyro, acc):
         """
