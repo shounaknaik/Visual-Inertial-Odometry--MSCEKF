@@ -223,7 +223,7 @@ class MSCKF(object):
         # print('---msckf elapsed:          ', time.time() - start, f'({feature_msg.timestamp})')
 
         try:
-            # Publish the odometry.
+            #  the odometry.
             return self.publish(feature_msg.timestamp)
         finally:
             # Reset the system if necessary.
@@ -391,22 +391,23 @@ class MSCKF(object):
         # Modify the transition matrix for nullspace thing.
         ...
 
+        ### Seen in https://patents.google.com/patent/US9243916B2/en
+
         R_k_1=to_rotation(imu_state.orientation_null)
         Phi[:3,:3]=to_rotation(imu_state.orientation)@ R_k_1.T
 
-        ## Review this !!!
-        u=R_k_1@IMUState.gravity
-        u=np.reshape(u,(3,1))
-        s=np.linalg.inv((u.T)@u)@(u.T)
 
-        A1=Phi[6:9,:3]
-        w1=skew(imu_state.velocity_null-imu_state.velocity)@IMUState.gravity.reshape((3,1))
-        Phi[6:9,:3]=A1-(np.dot(A1,u)-w1)@s
+        u = R_k_1 @ IMUState.gravity
+        s = u / (u @ u)
 
-        A2=Phi[12:15,:3]
-        w2=skew(imu_state.velocity_null+imu_state.position_null-imu_state.position)@IMUState.gravity.reshape((3,1))
-        Phi[12:15,:3]=A2-(A2@u-w2)@s
+        A1 = Phi[6:9, :3]
+        w1 = skew(imu_state.velocity_null - imu_state.velocity) @ IMUState.gravity
+        Phi[6:9, :3] = A1 - (A1 @ u - w1)[:, None] * s
 
+        A2 = Phi[12:15, :3]
+        w2 = skew(dt*imu_state.velocity_null+imu_state.position_null - 
+            imu_state.position) @ IMUState.gravity
+        Phi[12:15, :3] = A2 - (A2 @ u - w2)[:, None] * s
 
         # Propogate the state covariance matrix.
         ...
@@ -1111,6 +1112,32 @@ class MSCKF(object):
         print('   position:', imu_state.position)
         # print('   velocity:', imu_state.velocity)
         # print()
+
+        filename='estimated.txt'
+        f=open(filename,'a')
+
+        f.write(str(imu_state.timestamp))
+        f.write(' ')
+        f.write(str(imu_state.position[0]))
+        f.write(' ')
+        f.write(str(imu_state.position[1]))
+        f.write(' ')
+        f.write(str(imu_state.position[2]))
+        f.write(' ')
+        f.write(str(imu_state.orientation[0]))
+        f.write(' ')
+        f.write(str(imu_state.orientation[1]))
+        f.write(' ')
+        f.write(str(imu_state.orientation[2]))
+        f.write(' ')
+        f.write(str(imu_state.orientation[3]))
+        f.write(' ')
+        f.write('\n')
+
+        f.close()
+    
+        
+        ### Save into the text file
         
         T_i_w = Isometry3d(
             to_rotation(imu_state.orientation).T,
